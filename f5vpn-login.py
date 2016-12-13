@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """Log in to a F5 Firepass SSL VPN from a command-line, without using F5's
-browser-plugin and associated junk. Yay.
+browser-plugin and associated junk. Yay. Only for Tokyo Institute of Technology's VPN service.
 
 Works with OSX and linux, at the moment.
 
@@ -41,9 +41,13 @@ CERTIFICATE_FILE_LOCATIONS = [
     '/usr/lib/ssl/cert.pem',
     ]
 
+PORTAL_HOST = "portal.nap.gsic.titech.ac.jp"
+APM_HOST = "apm.nap.gsic.titech.ac.jp"
+RP_HOST = "rp.nap.gsic.titech.ac.jp"
+
 import socket, re, sys, os, time, fcntl, select, errno, signal
 import getpass, getopt, types
-from urllib import quote_plus
+from urllib import quote_plus, urlencode
 
 try:
     import socks
@@ -71,7 +75,7 @@ try:
             else:
                 ssl_sock = sslmodule.wrap_socket(s)
                 ssl_sock.do_handshake()
-        except sslmodule.SSLError, e:
+        except sslmodule.SSLError as e:
             if 'SSL3_GET_SERVER_CERTIFICATE:certificate verify failed' in str(e):
                 raise MyException("Couldn't validate server certificate.\nAre you being MITM'd? If not, try --dont-check-certificates\n" + str(e))
             else:
@@ -549,6 +553,197 @@ Host: %(host)s\r
         return match.group(1)
     return ''
 
+def do_portal_login(username, password):
+    request = """GET /GetAccess/Login?Template=userpass_key&AUTHMETHOD=UserPassword HTTP/1.0\r
+Accept: */*\r
+Accept-Encoding: gzip, deflate, sdch, br\r
+Accept-Language: en-US,en;q=0.8,en-GB;q=0.6\r
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36\r
+Referer: https://portal.nap.gsic.titech.ac.jp/
+Host: %(host)s\r
+\r
+""" % dict(host=PORTAL_HOST)
+    result = send_request(PORTAL_HOST, request)
+    
+    session = None
+    match = re.search('^Set-Cookie: JSESSIONID=([^;]*);', result, re.MULTILINE)
+    if match == None:
+        sys.stderr.write('Error: JSESSIONID not found!\n')
+        sys.exit(1)
+
+    sessid = match.group(1)
+    
+    match = re.search('name=\'pageGenTime\' value="([^"]+)"', result)
+    if match == None:
+        sys.stderr.write('Error: pageGenTime not found!\n')
+        sys.exit(1)
+
+    pageGenTime = match.group(1)
+
+    match = re.search("name='CSRFFormToken' value='([^']+)", result)
+    if match == None:
+        sys.stderr.write('Error: CSRFFormToken not found!\n')
+        sys.exit(1)
+
+    csrftoken = match.group(1)
+
+    body = "usr_name=%(user)s&usr_password=%(password)s&AUTHMETHOD=UserPassword&pageGenTime=%(pageGenTime)s&LOCALE=ja_JP&CSRFFormToken=%(csrftoken)s&HiddenURI=https://portal.nap.gsic.titech.ac.jp/GetAccess/ResourceList&OK=OK&Template=userpass_key" % dict(user=quote_plus(username), password=quote_plus(password), pageGenTime=pageGenTime, csrftoken=csrftoken)
+    request = """POST /GetAccess/Login HTTP/1.0\r
+Accept: */*\r
+Accept-Encoding: gzip, deflate, sdch, br\r
+Accept-Language: en-US,en;q=0.8,en-GB;q=0.6\r
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36\r
+Cookie: JSESSIONID=%(sessid)s\r
+Content-Type:application/x-www-form-urlencoded\r
+Content-Length: %(len)d\r
+Referer: https://%(host)s/GetAccess/Login?Template=userpass_key&AUTHMETHOD=UserPassword\r
+Host: %(host)s\r
+\r
+%(body)s
+""" % dict(host=PORTAL_HOST, len=len(body), body=body, sessid=sessid)
+    #print request
+    result = send_request(PORTAL_HOST, request)
+
+    match = re.search('^Set-Cookie: JSESSIONID=([^;]+);', result, re.MULTILINE)
+    if match == None:
+        sys.stderr.write('Error: JSESSIONID(2) not found!\n')
+        sys.exit(1)
+
+    sessid = match.group(1)
+
+    match = re.search('^Set-Cookie: AUTH_SESSION_ID=([^;]+);', result, re.MULTILINE)
+    if match == None:
+        sys.stderr.write('Error: AUTH_SESSION_ID not found!\n')
+        sys.exit(1)
+
+    auth_session_id = match.group(1)
+
+    match = re.search('^Location: ([^\n]+)', result, re.MULTILINE)
+    if match == None:
+        sys.stderr.write('Error: Location not found!\n')
+        sys.exit(1)
+
+    loc = match.group(1)
+
+    request = """GET /GetAccess/Login?Template=idg_key&AUTHMETHOD=IG&GASF=CERTIFICATE,IG.GRID&LOCALE=ja_JP&GAREASONCODE=13&GAIDENTIFICATIONID=UserPassword&GARESOURCEID=resourcelistID2&GAURI=https://portal.nap.gsic.titech.ac.jp/GetAccess/ResourceList&Reason=13&APPID=resourcelistID2&URI=https://portal.nap.gsic.titech.ac.jp/GetAccess/ResourceList HTTP/1.0\r
+Accept: */*\r
+Accept-Encoding: gzip, deflate, sdch, br\r
+Accept-Language: en-US,en;q=0.8,en-GB;q=0.6\r
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36\r
+Cookie: JSESSIONID=%(sessid)s; AUTH_SESSION_ID=%(auth_session_id)s\r
+Referer: https://portal.nap.gsic.titech.ac.jp/GetAccess/Login?Template=userpass_key&AUTHMETHOD=UserPassword\r
+Host: %(host)s\r
+\r
+""" % dict(host=PORTAL_HOST, sessid=sessid, auth_session_id=auth_session_id)
+    result = send_request(PORTAL_HOST, request)
+    
+    # Prompt for Matrix Input
+    matches = re.findall('(\[\w,\d\])', result)
+    if matches == None:
+        sys.stderr.write('Error: Matrix Authentication Codes not found!\n')
+        sys.exit(1)
+
+    inputs = []
+    messages = ['message3', 'message4', 'message5']
+    for m in matches:
+        inputs.append(raw_input('{}?: '.format(m)))
+
+    # Get All Form Hidden Values
+    keyval = get_hidden_values(result)
+    keyval.update(dict(zip(messages, inputs)))
+    body = urlencode(keyval)
+
+    request = """POST /GetAccess/Login HTTP/1.0\r
+Accept: */*\r
+Accept-Encoding: gzip, deflate, sdch, br\r
+Accept-Language: en-US,en;q=0.8,en-GB;q=0.6\r
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36\r
+Cookie: JSESSIONID=%(sessid)s; AUTH_SESSION_ID=%(auth_session_id)s\r
+Content-Type:application/x-www-form-urlencoded\r
+Content-Length: %(len)d\r
+Referer: https://%(host)s/GetAccess/Login?Template=userpass_key&AUTHMETHOD=UserPassword\r
+Host: %(host)s\r
+\r
+%(body)s
+""" % dict(host=PORTAL_HOST, len=len(body), body=body, sessid=sessid, auth_session_id=auth_session_id)
+    result = send_request(PORTAL_HOST, request)
+
+    match = re.search('^Set-Cookie: JSESSIONID=([^;]+);', result, re.MULTILINE)
+    if match == None:
+        sys.stderr.write('Error: JSESSIONID(2) not found!\n')
+        sys.exit(1)
+
+    sessid = match.group(1)
+
+    match = re.search('^Set-Cookie: AUTH_SESSION_ID=([^;]+);', result, re.MULTILINE)
+    if match == None:
+        sys.stderr.write('Error: AUTH_SESSION_ID not found!\n')
+        sys.exit(1)
+
+    auth_session_id = match.group(1)
+
+    request = """GET / HTTP/1.0\r
+Accept: */*\r
+Accept-Encoding: gzip, deflate, sdch, br\r
+Accept-Language: en-US,en;q=0.8,en-GB;q=0.6\r
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36\r
+Cookie: AUTH_SESSION_ID=%(auth_session_id)s\r
+Host: %(host)s\r
+\r
+""" % dict(host=APM_HOST, auth_session_id=auth_session_id)
+    result = send_request(APM_HOST, request)
+
+    matches = re.findall(r'Set-Cookie: (.*?)=(.*?);', result)
+    cookies = dict(matches)
+    cookies['AUTH_SESSION_ID'] = auth_session_id
+    cookies_encoded = '; '.join('{}={}'.format(key, val) for key, val in cookies.items())
+ 
+    request = """GET /my.policy HTTP/1.0\r
+Accept: */*\r
+Accept-Encoding: gzip, deflate, sdch, br\r
+Accept-Language: en-US,en;q=0.8,en-GB;q=0.6\r
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36\r
+Cookie: %(cookies)s\r
+Host: %(host)s\r
+\r
+""" % dict(host=APM_HOST, cookies=cookies_encoded)
+    result = send_request(APM_HOST, request)
+
+    matches = re.findall(r'Set-Cookie: (.*?)=(.*?);', result)
+    cookies.update(dict(matches))
+    cookies_encoded = '; '.join('{}={}'.format(key, val) for key, val in cookies.items())
+
+    body="username=%(username)s&password=%(password)s" % dict(username=username,password=password)
+    request = """POST /my.policy HTTP/1.0\r
+Accept: */*\r
+Accept-Encoding: gzip, deflate, sdch, br\r
+Accept-Language: en-US,en;q=0.8,en-GB;q=0.6\r
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.100 Safari/537.36\r
+Cookie: %(cookies)s\r
+Content-Type:application/x-www-form-urlencoded\r
+Content-Length: %(len)d\r
+Referer: https://rp.nap.gsic.titech.ac.jp/vpn_access/service/\r
+Host: %(host)s\r
+\r
+%(body)s
+""" % dict(host=APM_HOST, len=len(body), auth_session_id=auth_session_id, sessid=sessid, body=body, cookies=cookies_encoded)
+    result = send_request(APM_HOST, request)
+
+    matches = re.findall(r'Set-Cookie: (.*?)=(.*?);', result)
+    cookies.update(dict(matches))
+
+    if 'MRHSession' in cookies and cookies['MRHSession'] != None:
+        return cookies['MRHSession']
+    else:
+        sys.stderr.write('Failed to obtain MRHSession\n') 
+        sys.exit(1)
+
+def get_hidden_values(html_page):
+    matches = re.findall(r'type=[\'"]hidden[\'"] name=[\'"](.*?)[\'"] value=[\'"](.*?)[\'"]', html_page, re.IGNORECASE)
+    keyval = dict(matches)    
+
+    return keyval
+
 def do_login(client_data, host, username, password):
     body="rsa_port=&vhost=standard&username=%(user)s&password=%(password)s&client_data=%(client_data)s&login=Logon&state=&mrhlogonform=1&miniui=1&tzoffsetmin=1&sessContentType=HTML&overpass=&lang=en&charset=iso-8859-1&uilang=en&uicharset=iso-8859-1&uilangchar=en.iso-8859-1&langswitcher=" % dict(user=quote_plus(username), password=quote_plus(password), client_data=client_data)
 
@@ -610,7 +805,7 @@ Host: %(host)s\r
 \r
 """ % dict(host=host, session=session)
     result = send_request(host, request)
-    match = re.search('<favorite id="Z=([^"]*)">', result)
+    match = re.search('<favorite id="([^"]*?)">', result)
     if match:
         menu_number = match.group(1)
         result = send_request(host, request)
@@ -1075,7 +1270,7 @@ def write_prefs(line):
     except:
         print "Couldn't write prefs file: %s" % CONFIG_FILE
 
-# 2.3.5 or higher is required because of this (2.2.X ought to work too, but I've not tested it):
+# This code could technically work with 2.3.5 and higher, but for testability purposes, the minimum version is set to be 2.7
 #     ------------------------------------------------------------------------
 #     r37117 | doko | 2004-08-24 17:48:15 -0400 (Tue, 24 Aug 2004) | 4 lines
 #     [Patch #945642] Fix non-blocking SSL sockets, which blocked on reads/writes in Python 2.3.
@@ -1088,8 +1283,9 @@ def main(argv):
         usage(argv[0], sys.stdout)
         sys.exit(0)
 
-    if sys.version_info < (2,3,5):
-        sys.stderr.write("Python 2.3.5 or later is required.\n")
+    if sys.version_info < (2,7):
+        sys.stderr.write("Python 2.7 or later is required.\n")
+        sys.stderr.write("Current Version: %s\n" % sys.version)
         sys.exit(1)
 
     if os.geteuid() != 0:
@@ -1168,11 +1364,11 @@ def main(argv):
             session = old_session
 
     if params is None:
-        client_data = get_vpn_client_data(host)
+        #client_data = get_vpn_client_data(host)
         # Loop keep asking for passwords while the site gives a new prompt
         while True:
             password = getpass.getpass("password for %s@%s? " % (user, host))
-            session = do_login(client_data, host, user, password)
+            session = do_portal_login(user, password)
             if session is not None:
                 print "Session id gotten:", session
                 break

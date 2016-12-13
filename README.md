@@ -16,6 +16,8 @@ client. The only requirement is Python 2.3.5 or later. It works on at least
 Linux and OSX systems, but porting to any similar OS should be trivial. Porting
 to Windows, on the other hand, is probably not reasonably possible.
 
+This fork is meant to be used on Tokyo Institute of Technology's site.
+
 ## Installation
 
     sudo make install
