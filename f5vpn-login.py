@@ -732,8 +732,13 @@ Host: %(host)s\r
     matches = re.findall(r'Set-Cookie: (.*?)=(.*?);', result)
     cookies.update(dict(matches))
 
+    session = {}
+    session['AUTH_SESSION_ID'] = auth_session_id
+    session['F5_ST'] = cookies['F5_ST']
+    session['LastMRH_Session'] = cookies['LastMRH_Session']
     if 'MRHSession' in cookies and cookies['MRHSession'] != None:
-        return cookies['MRHSession']
+        session['MRHSession'] = cookies['MRHSession']
+        return session
     else:
         sys.stderr.write('Failed to obtain MRHSession\n') 
         sys.exit(1)
@@ -793,22 +798,25 @@ Content-Length: %(len)d\r
     else:
         return session
 
-def get_vpn_menu_number(host, session):
+def get_vpn_menu_number(session):
     # Find out the "Z" parameter to use to open a VPN connection
+
+    session_encoded = '; '.join('{}={}'.format(key, val) for key, val in session.items())
+
     request = """GET /vdesk/vpn/index.php3?outform=xml HTTP/1.0\r
 Accept: */*\r
 Accept-Language: en\r
-Cookie: uRoamTestCookie=TEST; VHOST=standard; MRHSession=%(session)s\r
+Cookie: %(session)s\r
 Referer: https://%(host)s/my.activation.php3\r
 User-Agent: Mozilla/5.0 (Macintosh; U; PPC Mac OS X; en) AppleWebKit/417.9 (KHTML, like Gecko) Safari/417.9.2\r
 Host: %(host)s\r
 \r
-""" % dict(host=host, session=session)
-    result = send_request(host, request)
+""" % dict(host=APM_HOST, session=session_encoded)
+    result = send_request(APM_HOST, request)
     match = re.search('<favorite id="([^"]*?)">', result)
     if match:
         menu_number = match.group(1)
-        result = send_request(host, request)
+        #result = send_request(APM_HOST, request)
         return match.group(1)
     else:
         if re.search('^Location: /my.logon.php3', result):
@@ -817,17 +825,22 @@ Host: %(host)s\r
         return None
 
 def get_VPN_params(host, session, menu_number):
-    request = """GET /vdesk/vpn/connect.php3?Z=%(menu_number)s HTTP/1.0\r
+    session['F5_fullWT'] = 1
+    session_encode = '; '.join('{}={}'.format(key, val) for key, val in session.items())
+
+    request = """GET /vdesk/resource_all_info.eui?resourcename=%(menu_number)s&resourcetype=network_access HTTP/1.0\r
 Accept: */*\r
 Accept-Language: en\r
-Cookie: uRoamTestCookie=TEST; VHOST=standard; MRHSession=%(session)s\r
-Referer: https://%(host)s/vdesk/index.php3\r
-User-Agent: Mozilla/5.0 (Macintosh; U; PPC Mac OS X; en) AppleWebKit/417.9 (KHTML, like Gecko) Safari/417.9.2\r
+Cookie: %(session)s\r
+Referer: https://apm.nap.gsic.titech.ac.jp/vdesk/webtop.eui?webtop=/Common/Apm_Resource_Webtop__Service-A&webtop_type=webtop_full\r
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/54.0.2840.71 Safari/537.36\r
 Host: %(host)s\r
 \r
-""" % dict(menu_number=menu_number, session=session, host=host)
+""" % dict(menu_number=menu_number, session=session_encode, host=host)
+    print request
     result = send_request(host, request)
-    #print "RESULT:", result
+    print result
+    sys.exit(0)
 
     # Try to find the plugin parameters
     matches = list(re.finditer("<embed [^>]*?(version=[^>]*)>", result))
@@ -1374,12 +1387,13 @@ def main(argv):
                 break
 
         print "Getting params..."
-        menu_number = get_vpn_menu_number(host, session)
+        menu_number = get_vpn_menu_number(session)
         if menu_number is None:
             sys.stderr.write("Unable to find the 'Network Access' entry in main menu. Do you have VPN access?\n")
             sys.exit(1)
 
-        params = get_VPN_params(host, session, menu_number)
+        print"Menu Number: %s" % menu_number
+        params = get_VPN_params(APM_HOST, session, menu_number)
 
     if params is None:
         print "Couldn't get embed info. Sorry."
