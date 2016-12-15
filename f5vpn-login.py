@@ -840,30 +840,39 @@ Host: %(host)s\r
     print request
     result = send_request(host, request)
     print result
-    sys.exit(0)
+    
+    # Find TunnelHost
+    #match = re.search('<tunnel_host0>(.*?)</tunnel_host0>', result)
+    params = {}
+    params['tunnel_host0'] = 'apm.nap.gsic.titech.ac.jp'
+    params['tunnel_port0'] = '443'
+    params['DNS0'] = '131.112.125.58 131.112.181.2'
+    #params['LAN0'] = '0.0.0.0/0.0.0.0 '
+    params['Session_ID'] = session['MRHSession']
 
     # Try to find the plugin parameters
-    matches = list(re.finditer("<embed [^>]*?(version=[^>]*)>", result))
-    if not matches:
-        # A new version of the server has switched to using javascript to write
-        # the parameters, now, so try matching that too.
-        matches = list(re.finditer("document.writeln\('(version=[^)]*)'\)", result))
+    # matches = list(re.finditer("<embed [^>]*?(version=[^>]*)>", result))
+    # if not matches:
+        # # A new version of the server has switched to using javascript to write
+        # # the parameters, now, so try matching that too.
+        # matches = list(re.finditer("document.writeln\('(version=[^)]*)'\)", result))
 
-    if not matches:
-        if re.search('^Location: /my.logon.php3', result):
-            # a redirect to the login page.
-            sys.stderr.write("Old session no longer valid.\n")
-            return None
-        sys.stderr.write("Embed info output:\n")
-        sys.stderr.write(result)
-        return None
+    # if not matches:
+        # if re.search('^Location: /my.logon.php3', result):
+            # # a redirect to the login page.
+            # sys.stderr.write("Old session no longer valid.\n")
+            # return None
+        # sys.stderr.write("Embed info output:\n")
+        # sys.stderr.write(result)
+        # return None
 
-    match = matches[-1]
-    params = match.group(1)
-    params = params.replace(' ', '&').replace('"', '')
-    paramsDict = decode_params(params)
+    # match = matches[-1]
+    # params = match.group(1)
+    # params = params.replace(' ', '&').replace('"', '')
+    # paramsDict = decode_params(params)
 
-    return paramsDict
+    #return paramsDict
+    return params
 
 
 def decode_params(paramsStr):
@@ -1399,7 +1408,7 @@ def main(argv):
         print "Couldn't get embed info. Sorry."
         sys.exit(2)
 
-    write_prefs('\0'.join(['', userhost, session]))
+    #write_prefs('\0'.join(['', userhost, session]))
 
     if verbosity:
         sys.stderr.write("VPN Parameter dump:\n")
