@@ -46,7 +46,7 @@ APM_HOST = "apm.nap.gsic.titech.ac.jp"
 RP_HOST = "rp.nap.gsic.titech.ac.jp"
 
 import socket, re, sys, os, time, fcntl, select, errno, signal
-import getpass, getopt, types
+import getpass, getopt, types, traceback
 from urllib import quote_plus, urlencode
 
 try:
@@ -837,9 +837,9 @@ User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Geck
 Host: %(host)s\r
 \r
 """ % dict(menu_number=menu_number, session=session_encode, host=host)
-    print request
+    #print request
     result = send_request(host, request)
-    print result
+    #print result
     
     # Find TunnelHost
     #match = re.search('<tunnel_host0>(.*?)</tunnel_host0>', result)
@@ -847,7 +847,7 @@ Host: %(host)s\r
     params['tunnel_host0'] = 'apm.nap.gsic.titech.ac.jp'
     params['tunnel_port0'] = '443'
     params['DNS0'] = '131.112.125.58 131.112.181.2'
-    #params['LAN0'] = '0.0.0.0/0.0.0.0 '
+    params['LAN0'] = '0.0.0.0/0.0.0.0'
     params['Session_ID'] = session['MRHSession']
 
     # Try to find the plugin parameters
@@ -990,7 +990,7 @@ def run_event_loop(pppd_fd, ssl_socket, ssl, logpipe_r, ppp_ip_up):
                 keepalive_socket.send('keepalive')
 
 
-        #print "SELECT GOT:", reads,writes,exc
+        print "SELECT GOT:", reads,writes,exc
 
         # To simplify matters, don't bother with what select returned. Just try
         # everything; it doesn't matter if it fails.
@@ -998,6 +998,7 @@ def run_event_loop(pppd_fd, ssl_socket, ssl, logpipe_r, ppp_ip_up):
         # Read data from log pipe
         try:
             logmsg = os.read(logpipe_r, 10000)
+            print 'LOGMSG: %s' % logmsg
             if not logmsg: #EOF
                 print "EOF on logpipe_r"
                 break
@@ -1100,6 +1101,7 @@ def parse_net_bits(routespec):
     # w.x.y.z/numbits
     # w.x.y.z/A.B.C.D
     # w[.x[.y[.z]]] (netmask implicit in number of .s)
+    print '/' in routespec
     if '/' in routespec:
         net, bits = routespec.split('/', 1)
         netparts = map(int, net.split('.'))
@@ -1160,6 +1162,7 @@ Cookie: MRHSession=%s\r
             ssl = sslwrap(tunnel_host, ssl_socket)
             ssl.write(request)
             initial_data = ssl.read()
+            print 'Initial data: %s' % initial_data
             break
         except socket.sslerror, e:
             # Sometimes the server seems to respond with "EOF occurred in violation of protocol"
@@ -1206,6 +1209,8 @@ Cookie: MRHSession=%s\r
                 routes_to_add.insert(0, ([0,0,0,0], 0))
 
     pid = os.fork()
+    traceback.print_stack()
+    print 'PID: %s' % pid
     if pid == 0:
         os.close(ssl_socket.fileno())
         # Setup new controlling TTY
@@ -1262,6 +1267,8 @@ Cookie: MRHSession=%s\r
         print "VPN link is up!"
 
     try:
+        print 'printing Stuff: '
+        print pppd_fd, ssl_socket, ssl, logpipe_r
         run_event_loop(pppd_fd, ssl_socket, ssl, logpipe_r, ppp_ip_up)
     finally:
         if params.get('DNS0'):
